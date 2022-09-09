@@ -1,3 +1,5 @@
+from time import strftime, gmtime
+
 import psycopg2 as psycopg2
 import os
 import requests
@@ -129,9 +131,12 @@ def clear_append_into_sheets(res):
     return response
 
 
-def get_data_for_sheets(data_from_first_request, data_from_second_request):
+def get_data_for_sheets(*args):
     data = {}
-    data['data'] = [{"sku_id_запрос1": res1}, {"sku_id_запрос2": res2}]
+    now = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+    res = [{"время": [now for argument in args]}, {"тип запроса": [i+1 for i in range(len(args))]}, {"кол-во записей":
+                                                                                                         [len(argument) for argument in args]}]
+    data['data'] = res
     return data
 
 
