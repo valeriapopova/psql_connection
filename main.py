@@ -1,7 +1,9 @@
 import psycopg2 as psycopg2
 import os
-
+import requests
 from psycopg2 import OperationalError
+
+from config import auth_dict
 
 
 def connection():
@@ -17,14 +19,14 @@ def connection():
     return connection_
 
 
-def execute_query(connection, query):
-    connection.autocommit = True
-    cursor = connection.cursor()
-    try:
-        cursor.execute(query)
-        print("Query executed successfully")
-    except OperationalError as e:
-        print(f"The error '{e}' occurred")
+# def execute_query(connection, query):
+#     connection.autocommit = True
+#     cursor = connection.cursor()
+#     try:
+#         cursor.execute(query)
+#         print("Query executed successfully")
+#     except OperationalError as e:
+#         print(f"The error '{e}' occurred")
 
 
 def execute_read_query(connection, query):
@@ -38,306 +40,109 @@ def execute_read_query(connection, query):
         print(f"The error '{e}' occurred")
 
 
-delete_1 = "DELETE FROM sku_cat_brand_list;"
+delete_1 = "DELETE FROM sku_cat_brand_list RETURNING id_sku;"
 
 
-call_2 = "CALL insert_sku_cat_brand_list();"
+call_2 = """
+    INSERT INTO sku_cat_brand_list (id_sku, id_category, brand_name)
+    SELECT sku_id, category_id, brand_name FROM (
+    SELECT  
+            foo.fbo_sku sku_id, 
+            -- foo.product_id,
+            foo.category_id category_id,
+            foo.value brand_name,	
+            ROW_NUMBER() OVER(PARTITION BY foo.fbo_sku) rnk
+        FROM
+            (SELECT  pa.attribute_id, pa.value, pl.fbo_sku, pl.product_id, pl.category_id FROM product_list pl
+                JOIN product_attr pa ON pa.product_id = pl.product_id) foo
+        WHERE (foo.attribute_id = '31' OR foo.attribute_id = '85') AND  foo.value <> '��� ������'  AND  foo.value <> '' AND foo.fbo_sku <> '0') foo
+    WHERE rnk = 1
+    RETURNING sku_id;
+"""
 
 
-call_3 = "CALL insert_data_analytics_main();"
-
-
-#
-# select_1 = """
-#         WITH calc_metrics AS (
-#             SELECT
-#                 sku_id,
-#                 sku_name,
-#                 "date",
-#                 COALESCE(adv_sum_all/(NULLIF(revenue,0)), 0) * 100 drr
-#             FROM
-#                 data_analytics_bydays_main dabm
-#             -- WHERE api_id LIKE :api_id AND brand_id LIKE :brand_id AND category_id LIKE :category_id
-#             )
-#         SELECT * FROM calc_metrics
-#         WHERE :trgt_drr >= drr
-#         ORDER BY drr DESC
-#
-# """
-# select_2 = """
-#         WITH calc_metrics AS (
-#             SELECT
-#                 sku_id,
-#                 sku_name,
-#                 "date",
-#                 COALESCE(adv_sum_all/(NULLIF(revenue,0)), 0) * 100 drr
-#             FROM
-#                 data_analytics_bydays_main dabm
-#             -- WHERE api_id LIKE :api_id AND brand_id LIKE :brand_id AND category_id LIKE :category_id
-#             )
-#         SELECT * FROM calc_metrics
-#         WHERE :trgt_drr < drr
-#         ORDER BY drr ASC
-# """
-# select_3 = """
-#             WITH calc_metrics AS (
-#             SELECT
-#                 sku_id,
-#                 "date",
-#                 adv_sum_all,
-#                 revenue,
-#                 ordered_units,
-#                 COALESCE(adv_sum_all/(NULLIF(revenue,0)), 0) * 100 drr
-#             FROM
-#                 data_analytics_bydays_main dabm
-#             -- WHERE api_id LIKE :api_id AND brand_id LIKE :brand_id AND category_id LIKE :category_id
-#             )
-#         SELECT
-#             clc.sku_id,
-#             clc."date",
-#             clc.revenue,
-#             clc.ordered_units,
-#             clc.drr,
-#             clc.adv_sum_all,
-#             pl.product_id,
-#             count(max_action_price) cmap,
-#             array_agg(max_action_price::int) map_arr,
-#             array_agg((price - max_action_price)::int) pmap_arr
-#         FROM calc_metrics clc
-#         LEFT JOIN product_list pl ON clc.sku_id = pl.fbo_sku
-#         LEFT JOIN mark_actions ma ON pl.product_id = ma.id_product AND clc.date = ma.date_end
-#         WHERE :trgt_drr < drr AND (price - max_action_price) < adv_sum_all AND (price - max_action_price)
-#         < :trgt_drr * revenue/ordered_units AND (price - max_action_price) != 0
-#         GROUP BY
-#             clc.sku_id,
-#             clc."date",
-#             clc.drr,
-#             clc.adv_sum_all, clc.revenue, clc.ordered_units,
-#             pl.product_id
-#         ORDER BY drr ASC
-# """
-# select_4 = """
-#         WITH calc_am AS (
-#             SELECT
-#                 "date",
-#                 avg(COALESCE(hits_tocart/(NULLIF(hits_view,0)), 0) * 100) ctr_avg,
-#                 percentile_cont(0.5) WITHIN GROUP (ORDER BY hits_view) hits_view_median
-#             FROM data_analytics_bydays_main dabm
-#             GROUP BY "date"
-#         ),
-#         calc_metrics AS (
-#             SELECT
-#                 sku_id,
-#                 dabm."date",
-#                 ca.ctr_avg,
-#                 ca.hits_view_median,
-#                 sum(revenue) revenue,
-#                 sum(adv_sum_all) adv_sum_all,
-#                 sum(hits_view) hits_view,
-#                 sum(hits_tocart) hits_tocart,
-#                 COALESCE(sum(hits_tocart)/(NULLIF(sum(hits_view),0)), 0) * 100  ctr,
-#                 COALESCE(sum(adv_sum_all)/(NULLIF(sum(revenue),0)), 0) * 100 drr,
-#                 COALESCE(sum(adv_sum_all)/(NULLIF(sum(hits_view),0)), 0) * 1000 cpm
-#             FROM
-#                 data_analytics_bydays_main dabm
-#             LEFT JOIN calc_am ca ON dabm."date" = ca."date"
-#             GROUP BY
-#                 sku_id, dabm."date",
-#                 ca.ctr_avg,	ca.hits_view_median
-#                 )
-#         SELECT
-#             *,
-#             CASE WHEN drr <= :trgt_drr AND drr != 0  THEN '<= drr_trgt'
-#                 WHEN drr = 0 THEN 'null drr'
-#                 WHEN drr > :trgt_drr AND drr != 0 THEN '> drr_trgt'
-#             END  drr_flg,
-#             cpm * (hits_view_median - hits_view) / 1000 hits_view_budget,
-#             hits_view_median * revenue/hits_view  revenue_potential
-#         FROM calc_metrics cm
-#         WHERE ctr > ctr_avg AND hits_view < hits_view_median
-# """
-select_5 = """
-        WITH calc_am AS ( 
+call_3 = """
+    INSERT INTO data_analytics_bydays_main (
+        api_id, sku_id, sku_name, "date", category_id, category_name, brand_id, brand_name, hits_view_search, hits_view_pdp, hits_view,
+        hits_tocart_search, hits_tocart_pdp, hits_tocart, session_view_search, session_view_pdp, session_view, conv_tocart_search,
+        conv_tocart_pdp, conv_tocart, revenue,"returns", cancellations, ordered_units, delivered_units, adv_view_pdp, adv_view_search_category,
+        adv_view_all, adv_sum_all, position_category, postings, postings_premium)
+    WITH dab1rnk AS (
         SELECT 
-            "date",
-            avg(COALESCE(hits_tocart/(NULLIF(hits_view,0)), 0) * 100) ctr_avg,
-            percentile_cont(0.5) WITHIN GROUP (ORDER BY hits_view) hits_view_median
-        FROM data_analytics_bydays_main dabm 
-        GROUP BY "date"	
+            *, ROW_NUMBER() OVER(PARTITION BY sku_id, "date"  ORDER BY id) rnk1
+        FROM data_analytics_bydays1
     ),
-    calc_metrics AS (  
+         dab2rnk AS (
         SELECT 
-            dabm."date",
-            brand_name, 
-            ca.ctr_avg,
-            ca.hits_view_median,
-            sum(hits_view) hits_view,
-            COALESCE(sum(hits_tocart)/(NULLIF(sum(hits_view),0)), 0) * 100  ctr
-        FROM
-            data_analytics_bydays_main dabm 
-        LEFT JOIN calc_am ca ON dabm."date" = ca."date"
-        GROUP BY 	
-            dabm."date",
-            brand_name,
-            ca.ctr_avg,	ca.hits_view_median )
-    SELECT 
-        brand_name,
-        "date",
-        ctr,
-        ctr_avg,
-        hits_view,
-        hits_view_median
-    FROM calc_metrics cm
-    WHERE ctr > ctr_avg AND hits_view < hits_view_median
-        GROUP BY 
-        brand_name,
-        "date",
-        ctr,
-        ctr_avg,
-        hits_view,
-        hits_view_median;
+            *, ROW_NUMBER() OVER(PARTITION BY sku_id, "date"  ORDER BY id) rnk2
+        FROM data_analytics_bydays2
+    )
+    SELECT
+        -- Main block --
+        COALESCE(dab1.api_id, dab2.api_id) 					api_id,
+        COALESCE(dab1.sku_id, dab2.sku_id) 					sku_id,
+        COALESCE(dab1.sku_name, dab2.sku_name) 				sku_name,
+        COALESCE(dab1."date" , dab2."date") 				"date",
+        COALESCE(dab1.category_id , dab2.category_id) 		category_id,
+        COALESCE(dab1.category_name , dab2.category_name) 	category_name,
+        COALESCE(dab1.brand_id , dab2.brand_id) 			brand_id,
+        COALESCE(scbl.brand_name, dab1.brand_name , dab2.brand_name) brand_name,
+        -- Metrics block table1 --
+        COALESCE(dab1.hits_view_search, 0) 					hits_view_search,
+        COALESCE(dab1.hits_view_pdp, 0) 					hits_view_pdp,
+        COALESCE(dab1.hits_view, 0) 						hits_view,
+        COALESCE(dab1.hits_tocart_search, 0) 				hits_tocart_search,
+        COALESCE(dab1.hits_tocart_pdp, 0) 					hits_tocart_pdp,
+        COALESCE(dab1.hits_tocart, 0) 						hits_tocart,
+        COALESCE(dab1.session_view_search, 0) 				session_view_search,
+        COALESCE(dab1.session_view_pdp, 0) 					session_view_pdp,
+        COALESCE(dab1.session_view, 0) 						session_view,
+        COALESCE(dab1.conv_tocart_search, 0) 				conv_tocart_search,
+        COALESCE(dab1.conv_tocart_pdp, 0) 					conv_tocart_pdp,
+        COALESCE(dab1.conv_tocart, 0) 						conv_tocart,
+        COALESCE(dab1.revenue, 0) 							revenue,
+        -- Metrics block table2 --
+        COALESCE(dab2."returns", 0) 						"returns",
+        COALESCE(dab2.cancellations, 0) 					cancellations,
+        COALESCE(dab2.ordered_units, 0) 					ordered_units,
+        COALESCE(dab2.delivered_units, 0) 					delivered_units,
+        COALESCE(dab2.adv_view_pdp, 0) 						adv_view_pdp,
+        COALESCE(dab2.adv_view_search_category, 0) 			adv_view_search_category,
+        COALESCE(dab2.adv_view_all, 0) 						adv_view_all,
+        COALESCE(dab2.adv_sum_all, 0) 						adv_view_sum_all,
+        COALESCE(dab2.position_category, 0) 				position_category,
+        COALESCE(dab2.postings, 0) 							postings,
+        COALESCE(dab2.postings_premium, 0) 					postings_premium
+    FROM dab1rnk dab1 
+    FULL JOIN dab2rnk dab2 ON dab1.sku_id = dab2.sku_id AND dab1."date" = dab2."date"
+    LEFT JOIN (SELECT id_sku, brand_name FROM sku_cat_brand_list) scbl ON dab1.sku_id =  scbl.id_sku OR dab2.sku_id =  scbl.id_sku
+    WHERE (dab1.rnk1 = 1 OR dab2.rnk2=1) AND (dab1."date" = (now() - interval '1 day')::date OR dab2."date" = (now() - interval '1 day')::date)
+    RETURNING sku_id;
 """
-select_6 = """
-        WITH calc_am AS ( 
-        SELECT 
-            "date",
-            avg(COALESCE(hits_tocart/(NULLIF(hits_view,0)), 0) * 100) ctr_avg,
-            percentile_cont(0.5) WITHIN GROUP (ORDER BY hits_view) hits_view_median
-        FROM data_analytics_bydays_main dabm 
-        GROUP BY "date"	
-    ),
-    calc_metrics AS (  
-        SELECT 
-            dabm."date",
-            category_id,
-            category_name, 
-            ca.ctr_avg,
-            ca.hits_view_median,
-            sum(hits_view) hits_view,
-            COALESCE(sum(hits_tocart)/(NULLIF(sum(hits_view),0)), 0) * 100  ctr
-        FROM
-            data_analytics_bydays_main dabm 
-        LEFT JOIN calc_am ca ON dabm."date" = ca."date"
-        GROUP BY 	
-            dabm."date",
-            category_id,
-            category_name,
-            ca.ctr_avg,	ca.hits_view_median
-            )
-    SELECT 
-        category_id,
-        category_name,
-        "date"
-        ctr,
-        ctr_avg,
-        hits_view,
-        hits_view_median
-    FROM calc_metrics cm
-    WHERE ctr > ctr_avg AND hits_view < hits_view_median
-        GROUP BY 
-        category_id, category_name, "date",
-        ctr,
-        ctr_avg,
-        hits_view,
-        hits_view_median;
-"""
-select_7 = """
-    WITH calc_am AS ( 
-        SELECT 
-            "date",
-            sum(revenue) revenue_all
-        FROM data_analytics_bydays_main dabm 
-        GROUP BY "date"	
-    ) 
-        SELECT 
-            dabm."date",
-            sku_id,
-            sku_name, 
-            ca.revenue_all,
-            revenue 
-        FROM
-            data_analytics_bydays_main dabm 
-        LEFT JOIN calc_am ca ON dabm."date" = ca."date"
-    WHERE revenue >= ca.revenue_all*20/100 AND revenue <> 0;
-        
-"""
-select_8 = """
-        SELECT 
-            id_product,
-            pl.offer_id,
-            pl."name"
-        FROM mark_actions ma
-        LEFT JOIN product_list pl ON ma.id_product = pl.product_id   
-        WHERE (price - max_action_price) = 0
-        GROUP BY 
-            id_product,
-            pl.offer_id,
-            pl."name";
 
-"""
-select_9 = """
-        SELECT 
-            sku_id,
-            sku_name,
-            sum(ts.fbo_present) fbo_present,
-            COALESCE(sum(ordered_units)/(NULLIF(sum(ts.fbo_present), 0)), 0) spd_fbo,
-            sum(ts.fbs_present) fbs_present,
-            COALESCE(sum(ordered_units)/(NULLIF(sum(ts.fbs_present), 0)), 0) spd_fbs
-        FROM data_analytics_bydays_main dabm 
-        LEFT JOIN product_list pl ON dabm.sku_id = pl.fbo_sku
-        LEFT JOIN total_stock ts ON pl.product_id  = ts.product_id 
-        WHERE ts."date" <= now()::date AND ts."date" >= (now() - interval '30 days')::date  
-        GROUP BY 
-            sku_id,
-            sku_name;
-"""
-select_10 = """
-        WITH calc AS ( 	
-        SELECT 
-            ts.product_id,
-            sku_id,
-            sku_name,
-            COALESCE(sum(ordered_units)/(NULLIF(sum(ts.fbo_present), 0)), 0) spd_fbo,
-            COALESCE(sum(ordered_units)/(NULLIF(sum(ts.fbs_present), 0)), 0) spd_fbs
-        FROM data_analytics_bydays_main dabm 
-        LEFT JOIN product_list pl ON dabm.sku_id = pl.fbo_sku
-        LEFT JOIN total_stock ts ON pl.product_id  = ts.product_id 
-        WHERE ts."date" <= now()::date AND ts."date" >= (now() - interval '30 days')::date  
-        GROUP BY 
-            ts.product_id,
-            sku_id,
-            sku_name
-            )
-    SELECT 
-        clc.product_id,
-        sku_id,
-        sku_name,
-        COALESCE(ts.fbo_present/(NULLIF(spd_fbo, 0)), 0) idc_fbo,
-        COALESCE(ts.fbo_present/(NULLIF(spd_fbs, 0)), 0) idc_fbs
-    FROM calc clc
-    LEFT JOIN total_stock ts ON clc.product_id  = ts.product_id 
-    WHERE ts."date" = now()::date;	
-"""
+
+def clear_append_into_sheets(res):
+    """ Перезаписывает данные в таблицу google sheets  """
+    res.update(auth_dict)
+    url_for_sheets = 'http://127.0.0.1:5001/sheets/clear_append'
+    response = requests.post(url_for_sheets, json=res)
+    return response
+
+
+def get_data_for_sheets(data_from_first_request, data_from_second_request):
+    data = {}
+    data['data'] = [{"sku_id_запрос1": res1}, {"sku_id_запрос2": res2}]
+    return data
 
 
 if __name__ == '__main__':
     conn = connection()
-    execute_query(conn, delete_1)
-    execute_query(conn, call_2)
-    execute_query(conn, call_3)
-    # list_1 = execute_read_query(conn, select_1)
-    # list_2 = execute_read_query(conn, select_2)
-    # list_3 = execute_read_query(conn, select_3)
-    # list_4 = execute_read_query(conn, select_4)
-    list_5 = execute_read_query(conn, select_5)
-    print(len(list_5))
-    list_6 = execute_read_query(conn, select_6)
-    print(len(list_6))
-    list_7 = execute_read_query(conn, select_7)
-    print(len(list_7))
-    list_8 = execute_read_query(conn, select_8)
-    print(len(list_8))
-    list_9 = execute_read_query(conn, select_9)
-    print(len(list_9))
-    list_10 = execute_read_query(conn, select_10)
-    print(len(list_10))
+    first = execute_read_query(conn, delete_1)
+    second = execute_read_query(conn, call_2)
+    third = execute_read_query(conn, call_3)
+    res1 = [pair[0] for pair in second]
+    res2 = [pair[0] for pair in third]
+    data_for_sheets = get_data_for_sheets(res1, res2)
+    clear_append_into_sheets(data_for_sheets)
+
+
